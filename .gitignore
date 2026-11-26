@@ -1,0 +1,5 @@
+# CT 多筆合併小工具的執行記錄（含照會單號），不要上傳
+ct_merge_log.txt
+
+__pycache__/
+*.pyc
