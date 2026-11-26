@@ -3,3 +3,6 @@ ct_merge_log.txt
 
 __pycache__/
 *.pyc
+
+# 免安裝版的建置結果（很大，不上傳）
+portable_build/

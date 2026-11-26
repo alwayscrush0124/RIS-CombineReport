@@ -2024,13 +2024,7 @@ class App(tk.Tk):
         super().__init__()
         self.title(f"CT 多筆合併小工具（{self.MODE}）")
         self.geometry("1280x740")
-        self.q = queue.Queue()
-        self.ris = Ris(log=lambda s: self.q.put(("log", s)))
-        self.patients = []
-        self.memory = {}             # {key: {"last": 時間, "manual": bool}}
-        self.busy = False
-        self.watching = False
-        self.stop_req = threading.Event()
+        self._init_state()
 
         # 第一排：檢查室、讀取、監看
         top = ttk.Frame(self, padding=(6, 6, 6, 2))
@@ -2063,8 +2057,21 @@ class App(tk.Tk):
         ttk.Spinbox(opt, from_=1, to=60, width=3, textvariable=self.retry_var).pack(side="left")
         ttk.Label(opt, text="分鐘試一次（同時重新查詢清單）").pack(side="left")
 
-        self.lbl = ttk.Label(self, text="RIS 開在「登錄作業清單」，選好檢查室後按「讀取清單（只看）」看看程式會做什麼",
-                             padding=(8, 0))
+        self._build_body("RIS 開在「登錄作業清單」，選好檢查室後按「讀取清單（只看）」看看程式會做什麼")
+        self.after(300, self._load_rooms)
+
+    def _init_state(self):
+        self.q = queue.Queue()
+        self.ris = Ris(log=lambda s: self.q.put(("log", s)))
+        self.patients = []
+        self.memory = {}             # {key: {"last": 時間, "manual": bool, "note": 說明}}
+        self.busy = False
+        self.watching = False
+        self.stop_req = threading.Event()
+
+    def _build_body(self, hint):
+        """說明列、中間的病人表格、下面的記錄；關視窗、開始收背景訊息。"""
+        self.lbl = ttk.Label(self, text=hint, padding=(8, 0))
         self.lbl.pack(fill="x")
 
         mid = ttk.Frame(self, padding=(6, 4))
@@ -2096,7 +2103,13 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.log(self.intro())
         self.after(120, self._drain)
-        self.after(300, self._load_rooms)
+
+    def _set_running(self, on):
+        """背景在做事（讀清單、監看）時哪些按鈕能按。"""
+        self.btn_load.config(state="disabled" if on else "normal")
+        self.btn_go.config(state="disabled" if on else "normal")
+        if not on:
+            self.btn_stop.config(state="disabled")
 
     def _load_rooms(self):
         """從 RIS 清單的「檢查室」選單讀選項（背景讀，不點任何東西）。"""
@@ -2148,11 +2161,11 @@ class App(tk.Tk):
                     self._front()
                     (messagebox.showinfo if ok else messagebox.showwarning)(title, body, parent=self)
                     self.attributes("-topmost", False)
+                elif kind == "call":
+                    payload()                   # 背景執行緒要改畫面：交給這裡做
                 elif kind == "done":
                     self.busy = self.watching = False
-                    self.btn_load.config(state="normal")
-                    self.btn_go.config(state="normal")
-                    self.btn_stop.config(state="disabled")
+                    self._set_running(False)
         except queue.Empty:
             pass
         self.after(120, self._drain)
@@ -2165,8 +2178,7 @@ class App(tk.Tk):
 
     def _run(self, fn):
         self.busy = True
-        self.btn_load.config(state="disabled")
-        self.btn_go.config(state="disabled")
+        self._set_running(True)
 
         def wrap():
             try:
@@ -2226,7 +2238,7 @@ class App(tk.Tk):
     def _plan_text(self, p):
         m = self.memory.get(p["key"], {})
         if m.get("manual"):
-            return "你選擇自己處理，不碰"
+            return m.get("note") or "你選擇自己處理，不碰"
         if m.get("note"):
             return m["note"]
         return p["why"]
@@ -2424,7 +2436,7 @@ class App(tk.Tk):
                         self.memory.setdefault(p["key"], {})["last"] = time.time() - REOPEN_COOLDOWN + LOOP_SEC
                     except ManualPatient as e:
                         current = None
-                        self.memory[p["key"]] = {"manual": True}
+                        self.memory[p["key"]] = {"manual": True, "note": f"不碰：{oneline(str(e), 60)}"}
                         log(f"  - {e}，這次監看不會再碰這位")
             except StopRun as e:
                 stopped = str(e)
